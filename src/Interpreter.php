@@ -5,7 +5,6 @@ use Context\PrintStatementContext;
 use Context\VarDeclarationContext;
 use Context\AssignmentStatementContext;
 use Context\IfStatementContext;
-use Context\WhileStatementContext;
 use Context\ContinueStatementContext;
 use Context\BreakStatementContext;
 use Context\ReturnStatementContext;
@@ -53,6 +52,7 @@ use Context\ForPostIncrementContext;
 use Context\ForPostDecrementContext;
 use Context\IncrementStatementContext;
 use Context\DecrementStatementContext;
+use Context\NilExpressionContext;
 
 class Interpreter extends GrammarBaseVisitor {
     public $console;
@@ -77,7 +77,11 @@ class Interpreter extends GrammarBaseVisitor {
     }
 
     public function visitPrintStatement(PrintStatementContext $ctx) {
-        $value = $this->visit($ctx->e());   
+        $value = $this->visit($ctx->e());
+        if ($value === null) {
+            $this->console .= "nil\n";
+            return $value;
+        }
         if (is_bool($value)) {
             $value = $value ? "true" : "false";
         }
@@ -96,7 +100,18 @@ class Interpreter extends GrammarBaseVisitor {
         $varName = $ctx->ID()->getText();
         $typeName = $ctx->type()->getText();
         $value = $this->visit($ctx->e());
-    
+
+        if (!Type::isCompatible($value, $typeName)) {
+            $inferredType = Type::inferType($value);
+            throw new Exception(
+                "Error semántico: No se puede asignar un valor de tipo '" . $inferredType . 
+                "' a la variable '" . $varName . "' de tipo '" . $typeName . "'"
+            );
+        }
+        if ($value !== null) {
+            $value = Type::cast($value, $typeName);
+        }
+        
         $this->env->set($varName, $value);
         return $value;
     }
@@ -122,30 +137,42 @@ class Interpreter extends GrammarBaseVisitor {
         $constName = $ctx->ID()->getText();
         $typeName = $ctx->type()->getText();
         $value = $this->visit($ctx->e());
-    
+        
+        if (!Type::isCompatible($value, $typeName)) {
+            $inferredType = Type::inferType($value);
+            throw new Exception(
+                "Error semántico: No se puede asignar un valor de tipo '" . $inferredType . 
+                "' a la constante '" . $constName . "' de tipo '" . $typeName . "'"
+            );
+        }
+        if ($value !== null) {
+            $value = Type::cast($value, $typeName);
+        }
+
         $this->env->set($constName, $value);
         return $value;
     }
     private function getDefaultValue($typeName) {
-        switch($typeName) {
-            case 'int32':
-                return 0;
-            case 'float32':
-                return 0.0;
-            case 'bool':
-                return false;
-            case 'rune':
-                return '\u0000';
-            case 'string':
-                return "";
-            default:
-                return null;
-        }
+        return Type::getDefault($typeName);
     }
 
     public function visitAssignmentStatement(AssignmentStatementContext $ctx) {
         $varName = $ctx->ID()->getText();
         $value = $this->visit($ctx->e());
+        $existingValue = $this->env->get($varName);
+        $existingType = Type::inferType($existingValue);
+        $newType = Type::inferType($value);
+        
+        if ($existingType !== Type::NIL && !Type::isCompatible($value, $existingType)) {
+            throw new Exception(
+                "Error semántico: No se puede asignar un valor de tipo '" . $newType . 
+                "' a la variable '" . $varName . "' de tipo '" . $existingType . "'"
+            );
+        }
+        if ($existingType !== Type::NIL && $value !== null) {
+            $value = Type::cast($value, $existingType);
+        }
+        
         $this->env->assign($varName, $value);
         return $value;
     }
@@ -390,12 +417,25 @@ class Interpreter extends GrammarBaseVisitor {
     public function visitOrExpression(OrExpressionContext $ctx) {
         if ($ctx->logicalOr() !== null) {
             $left = $this->visit($ctx->logicalOr());
-        
+            $leftType = Type::inferType($left);
+            if (!Type::canUseLogical($leftType)) {
+                throw new Exception(
+                    "Error semántico: Operador '||' requiere operandos de tipo 'bool', se recibió '" . $leftType . "'"
+                );
+            }
             if ($left === true) {
                 return true;
             }
-                
+            
             $right = $this->visit($ctx->logicalAnd());
+            $rightType = Type::inferType($right);
+
+            if (!Type::canUseLogical($rightType)) {
+                throw new Exception(
+                    "Error semántico: Operador '||' requiere operandos de tipo 'bool', se recibió '" . $rightType . "'"
+                );
+            }
+            
             return $left || $right;
         } else {
             return $this->visit($ctx->logicalAnd());
@@ -405,12 +445,26 @@ class Interpreter extends GrammarBaseVisitor {
     public function visitAndExpression(AndExpressionContext $ctx) {
         if ($ctx->logicalAnd() !== null) {
             $left = $this->visit($ctx->logicalAnd());
-
+            $leftType = Type::inferType($left);
+            if (!Type::canUseLogical($leftType)) {
+                throw new Exception(
+                    "Error semántico: Operador '&&' requiere operandos de tipo 'bool', se recibió '" . $leftType . "'"
+                );
+            }
+            
             if ($left === false) {
                 return false;
             }
-                
+            
             $right = $this->visit($ctx->eq());
+            $rightType = Type::inferType($right);
+
+            if (!Type::canUseLogical($rightType)) {
+                throw new Exception(
+                    "Error semántico: Operador '&&' requiere operandos de tipo 'bool', se recibió '" . $rightType . "'"
+                );
+            }
+            
             return $left && $right;
         } else {
             return $this->visit($ctx->eq());
@@ -422,7 +476,16 @@ class Interpreter extends GrammarBaseVisitor {
             $left = $this->visit($ctx->left);
             $right = $this->visit($ctx->right);
             $op = $ctx->op->getText();
-                
+            $leftType = Type::inferType($left);
+            $rightType = Type::inferType($right);
+            
+            if (!Type::canCompareEquality($leftType, $rightType)) {
+                throw new Exception(
+                    "Error semántico: No se puede comparar tipo '" . $leftType . 
+                    "' con tipo '" . $rightType . "' usando operador '" . $op . "'"
+                );
+            }
+            
             switch ($op) {
                 case '==':
                     return $left == $right;
@@ -441,6 +504,15 @@ class Interpreter extends GrammarBaseVisitor {
             $left = $this->visit($ctx->left);
             $right = $this->visit($ctx->right);
             $op = $ctx->op->getText();
+            $leftType = Type::inferType($left);
+            $rightType = Type::inferType($right);
+            
+            if (!Type::canCompareRelational($leftType, $rightType)) {
+                throw new Exception(
+                    "Error semántico: No se puede comparar tipo '" . $leftType . 
+                    "' con tipo '" . $rightType . "' usando operador '" . $op . "'"
+                );
+            }
 
             switch ($op) {
                 case '>':
@@ -465,11 +537,37 @@ class Interpreter extends GrammarBaseVisitor {
             $prod = $this->visit($ctx->prod());
             $op = $ctx->op->getText();
 
+            if (Type::propagateNil($add, $prod, $op)) {
+                return null;
+            }
+            
+            $leftType = Type::inferType($add);
+            $rightType = Type::inferType($prod);
+            
             switch ($op) {
                 case '+':
+                    $resultType = Type::getAdditionResultType($leftType, $rightType);
+                    if ($resultType === null) {
+                        throw new Exception(
+                            "Error semántico: Operación '+' inválida entre tipos '" . 
+                            $leftType . "' y '" . $rightType . "'"
+                        );
+                    }
+                    if ($resultType === Type::STRING) {
+                        return $add . $prod;
+                    }
                     return $add + $prod;
+                    
                 case '-':
+                    $resultType = Type::getArithmeticResultType($leftType, $rightType, '-');
+                    if ($resultType === null) {
+                        throw new Exception(
+                            "Error semántico: Operación '-' inválida entre tipos '" . 
+                            $leftType . "' y '" . $rightType . "'"
+                        );
+                    }
                     return $add - $prod;
+                    
                 default:
                     throw new Exception("Operador desconocido: " . $op);
             }
@@ -484,19 +582,56 @@ class Interpreter extends GrammarBaseVisitor {
             $unary = $this->visit($ctx->unary());
             $op = $ctx->op->getText();
 
+            if (Type::propagateNil($prod, $unary, $op)) {
+                return null;
+            }
+            
+            $leftType = Type::inferType($prod);
+            $rightType = Type::inferType($unary);
+
             switch ($op) {
                 case '*':
+                    if (($leftType === Type::STRING || $leftType === Type::RUNE) && $rightType === Type::INT32) {
+                        return str_repeat($prod, $unary);
+                    }
+                    if ($leftType === Type::INT32 && ($rightType === Type::STRING || $rightType === Type::RUNE)) {
+                        return str_repeat($unary, $prod);
+                    }
+                    $resultType = Type::getArithmeticResultType($leftType, $rightType, '*');
+                    if ($resultType === null) {
+                        throw new Exception(
+                            "Error semántico: Operación '*' inválida entre tipos '" . 
+                            $leftType . "' y '" . $rightType . "'"
+                        );
+                    }
                     return $prod * $unary;
+                    
                 case '/':
+                    $resultType = Type::getArithmeticResultType($leftType, $rightType, '/');
+                    if ($resultType === null) {
+                        throw new Exception(
+                            "Error semántico: Operación '/' inválida entre tipos '" . 
+                            $leftType . "' y '" . $rightType . "'"
+                        );
+                    }
                     if ($unary == 0) {
-                        throw new Exception("División por cero");
+                        throw new Exception("Error de ejecución: División por cero");
                     }
                     return $prod / $unary;
+                    
                 case '%':
+                    $resultType = Type::getModuloResultType($leftType, $rightType);
+                    if ($resultType === null) {
+                        throw new Exception(
+                            "Error semántico: Operación '%' inválida entre tipos '" . 
+                            $leftType . "' y '" . $rightType . "'"
+                        );
+                    }
                     if ($unary == 0) {
-                        throw new Exception("Módulo por cero");
+                        throw new Exception("Error de ejecución: Módulo por cero");
                     }
                     return $prod % $unary;
+                    
                 default:
                     throw new Exception("Operador desconocido: " . $op);
             }
@@ -505,12 +640,28 @@ class Interpreter extends GrammarBaseVisitor {
         }
     }
 
-    public function visitNegativeExpression(NegativeExpressionContext $ctx) {        
-        return - $this->visit($ctx->unary());
+    public function visitNegativeExpression(NegativeExpressionContext $ctx) {
+        $value = $this->visit($ctx->unary());
+        if (Type::propagateNilUnary($value, '-')) {
+            return null;
+        }
+        return -$value;
     }
 
-    public function visitNotExpression(NotExpressionContext $ctx) {        
-        return ! $this->visit($ctx->unary());
+    public function visitNotExpression(NotExpressionContext $ctx) {
+        $value = $this->visit($ctx->unary());
+        if (Type::propagateNilUnary($value, '!')) {
+            return null;
+        }
+
+        $type = Type::inferType($value);
+
+        if (!Type::canUseLogical($type)) {
+            throw new Exception(
+                "Error semántico: Operador '!' requiere operando de tipo 'bool', se recibió '" . $type . "'"
+            );
+        }
+        return !$value;
     }
 
     public function visitPrimaryExpression(PrimaryExpressionContext $ctx) {
@@ -532,6 +683,10 @@ class Interpreter extends GrammarBaseVisitor {
 
     public function visitBoolExpression(BoolExpressionContext $ctx) {
         return $ctx->bool->getText() === 'true';
+    }
+
+    public function visitNilExpression(NilExpressionContext $ctx) {
+        return null;
     }
 
     public function visitFunctionCallExpression(FunctionCallExpressionContext $ctx) {
@@ -603,7 +758,11 @@ class Interpreter extends GrammarBaseVisitor {
     }
 
     public function visitPrintExpression(PrintExpressionContext $ctx) {
-        $value = $this->visit($ctx->e());   
+        $value = $this->visit($ctx->e());
+        if ($value === null) {
+            $this->console .= "nil\n";
+            return $value;
+        }
         if (is_bool($value)) {
             $value = $value ? "true" : "false";
         }

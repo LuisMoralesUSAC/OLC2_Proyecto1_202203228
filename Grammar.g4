@@ -119,6 +119,7 @@ primary
     | 'print' '(' e ')'                # PrintExpression
     | FLOAT                            # FloatExpression
     | INT                              # IntExpression
+    | 'nil'                            # NilExpression
     | ID                               # ReferenceExpression
     | bool=('true'|'false')            # BoolExpression
     | ID '(' args? ')'                 # FunctionCallExpression

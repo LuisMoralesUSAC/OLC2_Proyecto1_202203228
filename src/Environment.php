@@ -17,12 +17,11 @@ class Environment {
     }
 
     public function get($key) {
-        $actual = $this->values[$key];        
-        if ($actual !== null) {
-            return $actual;
+        if (array_key_exists($key, $this->values)) {
+            return $this->values[$key];
         }
 
-        if ($actual === null && $this->father !== null) {
+        if ($this->father !== null) {
             return $this->father->get($key);
         }
         
@@ -41,8 +40,8 @@ class Environment {
         throw new Exception("Variable: '" . $key ."' no definida.");
     }
 
-    public function assign($key, $value) {    
-        if ($this->values[$key] !== null) {
+    public function assign($key, $value) {
+        if (array_key_exists($key, $this->values)) {
             $this->values[$key] = $value;
             return;
         }
