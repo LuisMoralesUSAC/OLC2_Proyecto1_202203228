@@ -13,6 +13,7 @@ type
     | 'string'
     ;
 
+// Statements
 stmt
     : 'print' '(' e ')'                    # PrintStatement
     | 'var' ID type '=' e                  # VarDeclarationTyped
@@ -21,14 +22,19 @@ stmt
     | 'const' ID type '=' e                # ConstDeclaration
     | 'var' ID '=' e                       # VarDeclaration    
     | ID '=' e                             # AssignmentStatement
-    | 'if' '(' e ')' block else?           # IfStatement
-    | 'while' '(' e ')' block              # WhileStatement
+    | 'if' e block else?                   # IfStatement
+    | 'for' forInit? ';' forCond? ';' forPost? block  # ForStatement
+    | 'for' e block                        # ForConditionStatement
+    | 'for' block                          # ForInfiniteStatement
+    | 'switch' e '{' switchCase* '}'       # SwitchStatement
     | 'continue'                           # ContinueStatement
     | 'break'                              # BreakStatement    
     | 'return' e?                          # ReturnStatement
     | 'func' ID '(' params? ')' block      # FunctionDeclaration
     | ID '(' args? ')'                     # FunctionCallStatement
     | ID ('[' index+=e ']')+ '=' assign=e  # ArrayAssignmentStatement
+    | ID '++'                              # IncrementStatement
+    | ID '--'                              # DecrementStatement
     ;
 
 block
@@ -37,6 +43,27 @@ block
 
 else
     : 'else' block
+    ;
+
+switchCase
+    : 'case' e (',' e)* ':'  stmt*         # CaseClause
+    | 'default' ':' stmt*                  # DefaultClause
+    ;
+    
+forInit
+    : 'var' ID type '=' e                  # ForInitVarTyped
+    | ID ':=' e                            # ForInitShort
+    | ID '=' e                             # ForInitAssign
+    ;
+
+forCond
+    : e
+    ;
+
+forPost
+    : ID '=' e                             # ForPostAssign
+    | ID '++'                              # ForPostIncrement
+    | ID '--'                              # ForPostDecrement
     ;
 
 /*
@@ -88,7 +115,8 @@ unary
     ;
 
 primary    
-    : '(' e ')'                        # GroupedExpression   
+    : '(' e ')'                        # GroupedExpression
+    | 'print' '(' e ')'                # PrintExpression
     | FLOAT                            # FloatExpression
     | INT                              # IntExpression
     | ID                               # ReferenceExpression

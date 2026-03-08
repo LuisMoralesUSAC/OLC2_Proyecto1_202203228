@@ -14,11 +14,9 @@ use Context\FunctionCallStatementContext;
 use Context\ArrayAssignmentStatementContext;
 use Context\BlockStatementContext;
 use Context\EqualityExpressionContext;
-use Context\InequalityExpressionContext;
 use Context\AddExpressionContext;
 use Context\ProductExpressionContext;
 use Context\PrimaryExpressionContext;
-use Context\UnaryExpressionContext;
 use Context\GroupedExpressionContext;
 use Context\IntExpressionContext;
 use Context\ReferenceExpressionContext;
@@ -40,10 +38,21 @@ use Context\AndExpressionContext;
 use Context\RelationalExpressionContext;
 use Context\NegativeExpressionContext;
 use Context\NotExpressionContext;
+use Context\PrintExpressionContext;
+use Context\SwitchStatementContext;
+use Context\CaseClauseContext;
+use Context\DefaultClauseContext;
 use Context\ForStatementContext;
 use Context\ForConditionStatementContext;
 use Context\ForInfiniteStatementContext;
-use Context\VarDclContext;
+use Context\ForInitVarTypedContext;
+use Context\ForInitShortContext;
+use Context\ForInitAssignContext;
+use Context\ForPostAssignContext;
+use Context\ForPostIncrementContext;
+use Context\ForPostDecrementContext;
+use Context\IncrementStatementContext;
+use Context\DecrementStatementContext;
 
 class Interpreter extends GrammarBaseVisitor {
     public $console;
@@ -156,16 +165,136 @@ class Interpreter extends GrammarBaseVisitor {
         }
     }
 
-    public function visitWhileStatement(WhileStatementContext $ctx) {        
-        do {
-            $condition = $this->visit($ctx->e());
-            if ($condition) {                
-                $flow = $this->visit($ctx->block());
-                if ($flow instanceof BreakType) {
-                    break;
-                }
+    public function visitForStatement(ForStatementContext $ctx) {
+        $prevEnv = $this->env;
+        $this->env = new Environment($prevEnv);
+                
+        if ($ctx->forInit() !== null) {
+            $this->visit($ctx->forInit());
+        }
+                
+        while (true) {
+            $condition = true;
+            if ($ctx->forCond() !== null) {
+                $condition = $this->visit($ctx->forCond()->e());
             }
-        } while ($condition);
+                
+            if (!$condition) {
+                break;
+            }
+                
+            $flow = $this->visit($ctx->block());
+        
+            if ($flow instanceof BreakType) {
+                break;
+            }
+                
+            if ($flow instanceof ReturnType) {
+                $this->env = $prevEnv;
+                return $flow;
+            }
+                
+            if ($ctx->forPost() !== null) {
+                $this->visit($ctx->forPost());
+            }
+        }
+                
+        $this->env = $prevEnv;
+        return null;
+    }
+
+    public function visitForConditionStatement(ForConditionStatementContext $ctx) {
+        while (true) {
+            $condition = $this->visit($ctx->e());
+                
+            if (!$condition) {
+                break;
+            }
+                
+            $flow = $this->visit($ctx->block());
+                
+            if ($flow instanceof BreakType) {
+                break;
+            }
+                
+            if ($flow instanceof ReturnType) {
+                return $flow;
+            }
+        }
+                
+        return null;
+    }
+
+    public function visitForInfiniteStatement(ForInfiniteStatementContext $ctx) {
+        while (true) {
+            $flow = $this->visit($ctx->block());
+                
+            if ($flow instanceof BreakType) {
+                break;
+            }
+                
+            if ($flow instanceof ReturnType) {
+                return $flow;
+            }
+        }
+                
+        return null;
+    }
+
+    public function visitForInitVarTyped(ForInitVarTypedContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        $value = $this->visit($ctx->e());
+        $this->env->set($varName, $value);
+        return $value;
+    }
+
+    public function visitForInitShort(ForInitShortContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        $value = $this->visit($ctx->e());
+        $this->env->set($varName, $value);
+        return $value;
+    }
+
+    public function visitForInitAssign(ForInitAssignContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        $value = $this->visit($ctx->e());
+        $this->env->assign($varName, $value);
+        return $value;
+    }
+
+    public function visitForPostAssign(ForPostAssignContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        $value = $this->visit($ctx->e());
+        $this->env->assign($varName, $value);
+        return $value;
+    }
+
+    public function visitForPostIncrement(ForPostIncrementContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        $value = $this->env->get($varName);
+        $this->env->assign($varName, $value + 1);
+        return null;
+    }
+
+    public function visitForPostDecrement(ForPostDecrementContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        $value = $this->env->get($varName);
+        $this->env->assign($varName, $value - 1);
+        return null;
+    }
+
+    public function visitIncrementStatement(IncrementStatementContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        $value = $this->env->get($varName);
+        $this->env->assign($varName, $value + 1);
+        return null;
+    }
+
+    public function visitDecrementStatement(DecrementStatementContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        $value = $this->env->get($varName);
+        $this->env->assign($varName, $value - 1);
+        return null;
     }
 
     public function visitContinueStatement(ContinueStatementContext $ctx) {        
@@ -471,5 +600,74 @@ class Interpreter extends GrammarBaseVisitor {
     public function visitRuneExpression(RuneExpressionContext $ctx) {
         $text = $ctx->RUNE()->getText();
         return substr($text, 1, -1);
+    }
+
+    public function visitPrintExpression(PrintExpressionContext $ctx) {
+        $value = $this->visit($ctx->e());   
+        if (is_bool($value)) {
+            $value = $value ? "true" : "false";
+        }
+        $this->console .= $value . "\n";
+        return $value;
+    }
+
+    public function visitSwitchStatement(SwitchStatementContext $ctx) {
+        $switchValue = $this->visit($ctx->e());
+    
+        $matched = false;
+    
+        foreach ($ctx->switchCase() as $caseCtx) {
+            if ($caseCtx instanceof CaseClauseContext) {
+
+                foreach ($caseCtx->e() as $caseExpr) {
+                    $caseValue = $this->visit($caseExpr);
+
+                    if ($switchValue == $caseValue) {
+                        $matched = true;
+                    
+                        foreach ($caseCtx->stmt() as $stmt) {
+                            $flow = $this->visit($stmt);
+                        
+                            if ($flow instanceof BreakType) {
+                                return null;
+                            }
+                            if ($flow instanceof ReturnType) {
+                                return $flow;
+                            }
+                        }
+                    
+                        return null;
+                    }
+                }
+            }
+        }
+
+        if (!$matched) {
+            foreach ($ctx->switchCase() as $caseCtx) {
+                if ($caseCtx instanceof DefaultClauseContext) {
+                    foreach ($caseCtx->stmt() as $stmt) {
+                        $flow = $this->visit($stmt);
+
+                        if ($flow instanceof BreakType) {
+                            return null;
+                        }
+                        if ($flow instanceof ReturnType) {
+                            return $flow;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+                    
+        return null;
+    }
+
+    public function visitCaseClause(CaseClauseContext $ctx) {
+        throw new Exception("visitCaseClause no debería llamarse directamente");
+    }
+
+    public function visitDefaultClause(DefaultClauseContext $ctx) {
+        throw new Exception("visitDefaultClause no debería llamarse directamente");
     }
 }
