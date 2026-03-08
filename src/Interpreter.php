@@ -28,8 +28,22 @@ use Context\ArrayExpressionContext;
 use Context\ArrayAccessExpressionContext;
 use Context\ParameterListContext;
 use Context\ArgumentListContext;
-
-
+use Context\VarDeclarationTypedContext;
+use Context\VarDeclarationTypedEmptyContext;
+use Context\ShortVarDeclarationContext;
+use Context\ConstDeclarationContext;
+use Context\FloatExpressionContext;
+use Context\StringExpressionContext;
+use Context\RuneExpressionContext;
+use Context\OrExpressionContext;
+use Context\AndExpressionContext;
+use Context\RelationalExpressionContext;
+use Context\NegativeExpressionContext;
+use Context\NotExpressionContext;
+use Context\ForStatementContext;
+use Context\ForConditionStatementContext;
+use Context\ForInfiniteStatementContext;
+use Context\VarDclContext;
 
 class Interpreter extends GrammarBaseVisitor {
     public $console;
@@ -67,6 +81,57 @@ class Interpreter extends GrammarBaseVisitor {
         $value = $this->visit($ctx->e());
         $this->env->set($varName, $value);
         return $value;
+    }
+
+    public function visitVarDeclarationTyped(VarDeclarationTypedContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        $typeName = $ctx->type()->getText();
+        $value = $this->visit($ctx->e());
+    
+        $this->env->set($varName, $value);
+        return $value;
+    }
+
+    public function visitVarDeclarationTypedEmpty(VarDeclarationTypedEmptyContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        $typeName = $ctx->type()->getText();
+    
+        $defaultValue = $this->getDefaultValue($typeName);
+        $this->env->set($varName, $defaultValue);
+        return $defaultValue;
+    }
+
+    public function visitShortVarDeclaration(ShortVarDeclarationContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        $value = $this->visit($ctx->e());
+
+        $this->env->set($varName, $value);
+        return $value;
+    }
+
+    public function visitConstDeclaration(ConstDeclarationContext $ctx) {
+        $constName = $ctx->ID()->getText();
+        $typeName = $ctx->type()->getText();
+        $value = $this->visit($ctx->e());
+    
+        $this->env->set($constName, $value);
+        return $value;
+    }
+    private function getDefaultValue($typeName) {
+        switch($typeName) {
+            case 'int32':
+                return 0;
+            case 'float32':
+                return 0.0;
+            case 'bool':
+                return false;
+            case 'rune':
+                return '\u0000';
+            case 'string':
+                return "";
+            default:
+                return null;
+        }
     }
 
     public function visitAssignmentStatement(AssignmentStatementContext $ctx) {
@@ -193,17 +258,56 @@ class Interpreter extends GrammarBaseVisitor {
         $this->env = $prevEnv;        
     }
 
+    public function visitOrExpression(OrExpressionContext $ctx) {
+        if ($ctx->logicalOr() !== null) {
+            $left = $this->visit($ctx->logicalOr());
+        
+            if ($left === true) {
+                return true;
+            }
+                
+            $right = $this->visit($ctx->logicalAnd());
+            return $left || $right;
+        } else {
+            return $this->visit($ctx->logicalAnd());
+        }
+    }
+
+    public function visitAndExpression(AndExpressionContext $ctx) {
+        if ($ctx->logicalAnd() !== null) {
+            $left = $this->visit($ctx->logicalAnd());
+
+            if ($left === false) {
+                return false;
+            }
+                
+            $right = $this->visit($ctx->eq());
+            return $left && $right;
+        } else {
+            return $this->visit($ctx->eq());
+        }
+    }
+
     public function visitEqualityExpression(EqualityExpressionContext $ctx) {
         if ($ctx->right !== null) {
             $left = $this->visit($ctx->left);
             $right = $this->visit($ctx->right);
-            return $left == $right;
+            $op = $ctx->op->getText();
+                
+            switch ($op) {
+                case '==':
+                    return $left == $right;
+                case '!=':
+                    return $left != $right;
+                default:
+                    throw new Exception("Operador desconocido: " . $op);
+            }
         } else {
             return $this->visit($ctx->left);
         }
     }
 
-    public function visitInequalityExpression(InequalityExpressionContext $ctx) {
+    public function visitRelationalExpression(RelationalExpressionContext $ctx) {
         if ($ctx->right !== null) {
             $left = $this->visit($ctx->left);
             $right = $this->visit($ctx->right);
@@ -212,8 +316,12 @@ class Interpreter extends GrammarBaseVisitor {
             switch ($op) {
                 case '>':
                     return $left > $right;
+                case '>=':
+                    return $left >= $right;
                 case '<':
                     return $left < $right;
+                case '<=':
+                    return $left <= $right;
                 default:
                     throw new Exception("Operador desconocido: " . $op);
             }
@@ -251,7 +359,15 @@ class Interpreter extends GrammarBaseVisitor {
                 case '*':
                     return $prod * $unary;
                 case '/':
+                    if ($unary == 0) {
+                        throw new Exception("División por cero");
+                    }
                     return $prod / $unary;
+                case '%':
+                    if ($unary == 0) {
+                        throw new Exception("Módulo por cero");
+                    }
+                    return $prod % $unary;
                 default:
                     throw new Exception("Operador desconocido: " . $op);
             }
@@ -260,12 +376,16 @@ class Interpreter extends GrammarBaseVisitor {
         }
     }
 
-    public function visitPrimaryExpression(PrimaryExpressionContext $ctx) {
-        return $this->visit($ctx->primary());
+    public function visitNegativeExpression(NegativeExpressionContext $ctx) {        
+        return - $this->visit($ctx->unary());
     }
 
-    public function visitUnaryExpression(UnaryExpressionContext $ctx) {        
-        return - $this->visit($ctx->unary());
+    public function visitNotExpression(NotExpressionContext $ctx) {        
+        return ! $this->visit($ctx->unary());
+    }
+
+    public function visitPrimaryExpression(PrimaryExpressionContext $ctx) {
+        return $this->visit($ctx->primary());
     }
 
     public function visitGroupedExpression(GroupedExpressionContext $ctx) {
@@ -337,5 +457,19 @@ class Interpreter extends GrammarBaseVisitor {
             $args[] = $this->visit($arg);
         }
         return $args;
+    }
+
+    public function visitFloatExpression(FloatExpressionContext $ctx) {
+        return floatval($ctx->FLOAT()->getText());
+    }
+
+    public function visitStringExpression(StringExpressionContext $ctx) {
+        $text = $ctx->STRING()->getText();
+        return substr($text, 1, -1);
+    }
+
+    public function visitRuneExpression(RuneExpressionContext $ctx) {
+        $text = $ctx->RUNE()->getText();
+        return substr($text, 1, -1);
     }
 }

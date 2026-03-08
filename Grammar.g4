@@ -5,9 +5,20 @@ p
     : stmt* EOF                            # Program
     ;
 
-// Statements
+type
+    : 'int32'
+    | 'float32'
+    | 'bool'
+    | 'rune'
+    | 'string'
+    ;
+
 stmt
     : 'print' '(' e ')'                    # PrintStatement
+    | 'var' ID type '=' e                  # VarDeclarationTyped
+    | 'var' ID type                        # VarDeclarationTypedEmpty
+    | ID ':=' e                            # ShortVarDeclaration
+    | 'const' ID type '=' e                # ConstDeclaration
     | 'var' ID '=' e                       # VarDeclaration    
     | ID '=' e                             # AssignmentStatement
     | 'if' '(' e ')' block else?           # IfStatement
@@ -39,15 +50,25 @@ else
 */
 
 e    
-    : eq                       
+    : logicalOr                       
+    ;
+
+logicalOr
+    : logicalOr '||' logicalAnd        # OrExpression
+    | logicalAnd                       # OrExpression
+    ;
+
+logicalAnd
+    : logicalAnd '&&' eq               # AndExpression
+    | eq                               # AndExpression
     ;
 
 eq
-    : left=ineq ('==' right=ineq)?     # EqualityExpression
+    : left=rel (op=('=='|'!=') right=rel)?  # EqualityExpression
     ;
 
-ineq
-    : left=add (op=('>'|'<') right=add)? # InequalityExpression    
+rel
+    : left=add (op=('>'|'>='|'<'|'<=') right=add)? # RelationalExpression    
     ;
 
 add 
@@ -56,23 +77,27 @@ add
     ;
 
 prod
-    : prod op=('*' | '/') unary        # ProductExpression
+    : prod op=('*' | '/' | '%') unary  # ProductExpression
     | unary                            # ProductExpression
     ;
 
 unary
     : primary                          # PrimaryExpression
-    | '-' unary                        # UnaryExpression
+    | '-' unary                        # NegativeExpression
+    | '!' unary                        # NotExpression
     ;
 
 primary    
     : '(' e ')'                        # GroupedExpression   
+    | FLOAT                            # FloatExpression
     | INT                              # IntExpression
     | ID                               # ReferenceExpression
     | bool=('true'|'false')            # BoolExpression
     | ID '(' args? ')'                 # FunctionCallExpression
     | '[' e (',' e)* ']'               # ArrayExpression
     | ID ('[' e ']')+                  # ArrayAccessExpression
+    | STRING                           # StringExpression
+    | RUNE                             # RuneExpression
     ;
 
 params
@@ -84,6 +109,13 @@ args
     ;
 
 // Lexer rules
-INT : [0-9]+ ;
-ID  : [a-zA-Z_][a-zA-Z0-9_]* ;
+FLOAT : [0-9]+ '.' [0-9]+ ;
+INT   : [0-9]+ ;
+STRING : '"' (~["\r\n] | '\\' .)* '"' ;
+RUNE   : '\'' (~['\r\n] | '\\' .)* '\'' ;
+ID    : [a-zA-Z_][a-zA-Z0-9_]* ;
+
+LINE_COMMENT  : '//' ~[\r\n]* -> skip ;
+BLOCK_COMMENT : '/*' .*? '*/' -> skip ;
+
 WS  : [ \t\r\n]+ -> skip ;
