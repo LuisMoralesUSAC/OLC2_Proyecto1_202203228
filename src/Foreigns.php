@@ -31,13 +31,13 @@ class Foreign extends Invocable {
                 $tipoRecibido = Type::inferType($valorArg);
                 
                 if (!Type::isCompatible($valorArg, $tipoEsperado)) {
-                    throw new Exception(
-                        "Error semántico: El parámetro '" . $nombreParam . 
-                        "' espera tipo '" . $tipoEsperado . 
-                        "' pero recibió '" . $tipoRecibido . "'"
-                    );
+                    $visitor->console .= "Advertencia: El parámetro '" . $nombreParam . 
+                                        "' espera tipo '" . $tipoEsperado . 
+                                        "' pero recibió '" . $tipoRecibido . "'\n";
+                    if ($valorArg !== null) {
+                        $valorArg = Type::cast($valorArg, $tipoEsperado);
+                    }
                 }
-                
                 if ($valorArg !== null) {
                     $valorArg = Type::cast($valorArg, $tipoEsperado);
                 }
@@ -48,26 +48,23 @@ class Foreign extends Invocable {
         
         $envBeforeCall = $visitor->env;
         $visitor->env = $newEnv;
-        
         $ambitoAnterior = $visitor->ambitoActual;
         $nombreFuncion = $this->ctx->ID()->getText();
         $visitor->ambitoActual = $nombreFuncion;
-        
         $result = $visitor->visit($this->ctx->block());
         
         if ($result instanceof ReturnType) {
             $valorRetorno = $result->value;
-            
             if ($this->tipoRetorno !== null) {
                 $tipoRetornoReal = Type::inferType($valorRetorno);
                 
                 if (!Type::isCompatible($valorRetorno, $this->tipoRetorno)) {
-                    throw new Exception(
-                        "Error semántico: La función debe retornar tipo '" . 
-                        $this->tipoRetorno . "' pero retornó '" . $tipoRetornoReal . "'"
-                    );
+                    $visitor->console .= "Advertencia: La función debe retornar tipo '" . 
+                                        $this->tipoRetorno . "' pero retornó '" . $tipoRetornoReal . "'\n";
+                    if ($valorRetorno !== null) {
+                        $valorRetorno = Type::cast($valorRetorno, $this->tipoRetorno);
+                    }
                 }
-                
                 if ($valorRetorno !== null) {
                     $valorRetorno = Type::cast($valorRetorno, $this->tipoRetorno);
                 }

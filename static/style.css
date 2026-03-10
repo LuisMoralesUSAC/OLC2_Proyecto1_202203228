@@ -85,3 +85,64 @@ input[type="submit"]:hover {
     min-height: 50px;
     overflow-x: auto; /* para líneas largas */
 }
+
+.button-container {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.button-container input[type="submit"],
+.button-container button {
+    padding: 10px 20px;
+    background-color: #ffcc00;
+    color: #1e1e2f;
+    border: none;
+    border-radius: 8px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.button-container button {
+    background-color: #4CAF50;
+    color: white;
+}
+
+.button-container input[type="submit"]:hover {
+    background-color: #e6b800;
+}
+
+.button-container button:hover {
+    background-color: #45a049;
+}
+
+.reportes-container {
+    margin-top: 20px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.btn-reporte {
+    padding: 10px 20px;
+    background-color: #2196F3;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    font-size: 14px;
+}
+
+.btn-reporte:hover {
+    background-color: #0b7dda;
+}
+
+h2 {
+    color: #ffcc00;
+    margin-top: 30px;
+    margin-bottom: 15px;
+}
