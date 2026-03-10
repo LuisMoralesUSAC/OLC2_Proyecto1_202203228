@@ -57,12 +57,15 @@ use Context\NilExpressionContext;
 class Interpreter extends GrammarBaseVisitor {
     public $console;
     public $env;
-
     public $embebed;
+    public $tablaSimbolos;
+    public $ambitoActual;
 
     public function __construct() {
         $this->console = "";
         $this->env = new Environment();
+        $this->tablaSimbolos = new TablaSimbolos();
+        $this->ambitoActual = "global";
         $this->embebed = include __DIR__ . "/Natives.php";
         foreach ($this->embebed as $name => $function) {
             $this->env->set($name, $function);
@@ -93,6 +96,8 @@ class Interpreter extends GrammarBaseVisitor {
         $varName = $ctx->ID()->getText();
         $value = $this->visit($ctx->e());
         $this->env->set($varName, $value);
+        $tipoInferido = Type::inferType($value);
+        $this->registrarSimbolo($varName, $tipoInferido, $value, $ctx);
         return $value;
     }
 
@@ -108,28 +113,32 @@ class Interpreter extends GrammarBaseVisitor {
                 "' a la variable '" . $varName . "' de tipo '" . $typeName . "'"
             );
         }
+        
         if ($value !== null) {
             $value = Type::cast($value, $typeName);
         }
-        
+
         $this->env->set($varName, $value);
+        $this->registrarSimbolo($varName, $typeName, $value, $ctx);
+        
         return $value;
     }
 
     public function visitVarDeclarationTypedEmpty(VarDeclarationTypedEmptyContext $ctx) {
         $varName = $ctx->ID()->getText();
         $typeName = $ctx->type()->getText();
-    
         $defaultValue = $this->getDefaultValue($typeName);
         $this->env->set($varName, $defaultValue);
+        $this->registrarSimbolo($varName, $typeName, $defaultValue, $ctx);
         return $defaultValue;
     }
 
     public function visitShortVarDeclaration(ShortVarDeclarationContext $ctx) {
         $varName = $ctx->ID()->getText();
         $value = $this->visit($ctx->e());
-
         $this->env->set($varName, $value);
+        $tipoInferido = Type::inferType($value);
+        $this->registrarSimbolo($varName, $tipoInferido, $value, $ctx);
         return $value;
     }
 
@@ -150,6 +159,7 @@ class Interpreter extends GrammarBaseVisitor {
         }
 
         $this->env->set($constName, $value);
+        $this->registrarSimbolo($constName, $typeName, $value, $ctx);
         return $value;
     }
     private function getDefaultValue($typeName) {
@@ -195,38 +205,42 @@ class Interpreter extends GrammarBaseVisitor {
     public function visitForStatement(ForStatementContext $ctx) {
         $prevEnv = $this->env;
         $this->env = new Environment($prevEnv);
-                
+        $ambitoAnterior = $this->ambitoActual;
+        $this->ambitoActual = "for";
+
         if ($ctx->forInit() !== null) {
             $this->visit($ctx->forInit());
         }
-                
+        
         while (true) {
             $condition = true;
             if ($ctx->forCond() !== null) {
                 $condition = $this->visit($ctx->forCond()->e());
             }
-                
+
             if (!$condition) {
                 break;
             }
-                
+
             $flow = $this->visit($ctx->block());
-        
+            
             if ($flow instanceof BreakType) {
                 break;
             }
-                
+
             if ($flow instanceof ReturnType) {
                 $this->env = $prevEnv;
+                $this->ambitoActual = $ambitoAnterior;
                 return $flow;
             }
-                
+            
             if ($ctx->forPost() !== null) {
                 $this->visit($ctx->forPost());
             }
         }
-                
+
         $this->env = $prevEnv;
+        $this->ambitoActual = $ambitoAnterior;
         return null;
     }
 
@@ -341,12 +355,26 @@ class Interpreter extends GrammarBaseVisitor {
     }
 
     public function visitFunctionDeclaration(FunctionDeclarationContext $ctx) {
-        $params = array();
+        $nombreFuncion = $ctx->ID()->getText();
+        
+        $params = [];
+        $tiposParams = [];
+        
         if ($ctx->params() !== null) {
-            $params = $this->visit($ctx->params());
+            $paramsData = $this->visit($ctx->params());
+            $params = $paramsData['nombres'];
+            $tiposParams = $paramsData['tipos'];
         }
-        $function = new Foreign($ctx, $this->env, $params);
-        $this->env->set($ctx->ID()->getText(), $function);
+        
+        $tipoRetorno = null;
+        if ($ctx->type() !== null) {
+            $tipoRetorno = $ctx->type()->getText();
+        }
+        
+        $function = new Foreign($ctx, $this->env, $params, $tiposParams, $tipoRetorno);
+        
+        $this->env->set($nombreFuncion, $function);
+        $this->registrarSimbolo($nombreFuncion, "function", $function, $ctx);
     }
 
     public function visitFunctionCallStatement(FunctionCallStatementContext $ctx) {
@@ -403,15 +431,19 @@ class Interpreter extends GrammarBaseVisitor {
 
     public function visitBlockStatement(BlockStatementContext $ctx) {
         $prevEnv = $this->env;
-        $this->env = new Environment($prevEnv);                
+        $this->env = new Environment($prevEnv);
+        $ambitoAnterior = $this->ambitoActual;
+        $this->ambitoActual = "bloque";
         foreach ($ctx->stmt() as $stmt) {            
             $flow = $this->visit($stmt);            
             if ($flow instanceof FlowType) {
-                $this->env = $prevEnv;                
+                $this->env = $prevEnv;
+                $this->ambitoActual = $ambitoAnterior;
                 return $flow;
             }
         }
-        $this->env = $prevEnv;        
+        $this->env = $prevEnv;
+        $this->ambitoActual = $ambitoAnterior;
     }
 
     public function visitOrExpression(OrExpressionContext $ctx) {
@@ -729,10 +761,23 @@ class Interpreter extends GrammarBaseVisitor {
 
     public function visitParameterList(ParameterListContext $ctx) {
         $params = array();
-        foreach ($ctx->ID() as $id) {
-            $params[] = $id->getText();
+        $tipos = array();
+        
+        $ids = $ctx->ID();
+        $types = $ctx->type();
+        
+        for ($i = 0; $i < count($ids); $i++) {
+            $paramNombre = $ids[$i]->getText();
+            $paramTipo = $types[$i]->getText();
+            
+            $params[] = $paramNombre;
+            $tipos[] = $paramTipo;
         }
-        return $params;
+        
+        return [
+            'nombres' => $params,
+            'tipos' => $tipos
+        ];
     }
 
     public function visitArgumentList(ArgumentListContext $ctx) {
@@ -828,5 +873,25 @@ class Interpreter extends GrammarBaseVisitor {
 
     public function visitDefaultClause(DefaultClauseContext $ctx) {
         throw new Exception("visitDefaultClause no debería llamarse directamente");
+    }
+
+    private function registrarSimbolo($nombre, $tipo, $valor, $ctx) {
+        $linea = $ctx->getStart()->getLine();
+        $columna = $ctx->getStart()->getCharPositionInLine();
+        
+        $simbolo = new Simbolo(
+            $nombre,
+            $tipo,
+            $valor,
+            $this->ambitoActual,
+            $linea,
+            $columna
+        );
+        
+        $this->tablaSimbolos->agregar($simbolo);
+    }
+
+    public function obtenerTablaSimbolos() {
+        return $this->tablaSimbolos;
     }
 }

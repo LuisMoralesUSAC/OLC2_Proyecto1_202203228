@@ -30,7 +30,7 @@ stmt
     | 'continue'                           # ContinueStatement
     | 'break'                              # BreakStatement    
     | 'return' e?                          # ReturnStatement
-    | 'func' ID '(' params? ')' block      # FunctionDeclaration
+    | 'func' ID '(' params? ')' type? block  # FunctionDeclaration
     | ID '(' args? ')'                     # FunctionCallStatement
     | ID ('[' index+=e ']')+ '=' assign=e  # ArrayAssignmentStatement
     | ID '++'                              # IncrementStatement
@@ -130,7 +130,7 @@ primary
     ;
 
 params
-    : ID (',' ID)*                      # ParameterList
+    : ID type (',' ID type)*               # ParameterList
     ;
 
 args

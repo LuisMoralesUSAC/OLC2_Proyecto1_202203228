@@ -10,3 +10,5 @@ require_once __DIR__ . "/src/Environment.php";
 require_once __DIR__ . "/src/FlowTypes.php";
 require_once __DIR__ . "/src/Invocable.php";
 require_once __DIR__ . "/src/Foreigns.php";
+require_once __DIR__ . "/src/Simbolo.php";
+require_once __DIR__ . "/src/TablaSimbolos.php";
