@@ -56,6 +56,15 @@ use Context\NilExpressionContext;
 use Context\ModuleFunctionCallContext;
 use Context\ModuleFunctionExpressionContext;
 use Context\IdExpressionContext;
+use Context\ArrayLiteralExpressionContext;
+use Context\SimpleArrayElementContext;
+use Context\NestedArrayElementContext;
+use Context\ArrayElementsContext;
+use Context\VarDeclarationTypedMultipleContext;
+use Context\ShortVarDeclarationMultipleContext;
+use Context\TrueExpressionContext;
+use Context\FalseExpressionContext;
+use Context\CompoundAssignmentStatementContext;
 
 class Interpreter extends GrammarBaseVisitor {
     public $console;
@@ -163,7 +172,35 @@ class Interpreter extends GrammarBaseVisitor {
 
     public function visitVarDeclarationTyped(VarDeclarationTypedContext $ctx) {
         $varName = $ctx->ID()->getText();
-        $typeName = $ctx->type()->getText();
+        $typeCtx = $ctx->type();
+        
+        if ($typeCtx->INT() !== null) {
+            $arrayInfo = Type::parseArrayType($typeCtx);
+            
+            if ($ctx->e() !== null) {
+                $value = $this->visit($ctx->e());
+                
+                if (!Type::validateArrayStructure($value, $arrayInfo['dimensions'], $arrayInfo['baseType'])) {
+                    throw new Exception(
+                        "El valor no coincide con el tipo de arreglo declarado"
+                    );
+                }
+            } else {
+                $value = Type::createArrayWithDefaults(
+                    $arrayInfo['dimensions'],
+                    $arrayInfo['baseType']
+                );
+            }
+            
+            $this->env->set($varName, $value);
+            
+            $tipoStr = Type::arrayTypeToString($arrayInfo['dimensions'], $arrayInfo['baseType']);
+            $this->registrarSimbolo($varName, $tipoStr, $value, $ctx);
+            
+            return $value;
+        }
+        
+        $typeName = $typeCtx->getText();
         $value = $this->visit($ctx->e());
 
         if (!Type::isCompatible($value, $typeName)) {
@@ -183,10 +220,97 @@ class Interpreter extends GrammarBaseVisitor {
         
         return $value;
     }
+    
+    public function visitArrayLiteralExpression(ArrayLiteralExpressionContext $ctx) {
+        $size = intval($ctx->arrayLiteral()->INT()->getText());
+        $typeCtx = $ctx->arrayLiteral()->type();
+        
+        if ($typeCtx->INT() !== null) {
+            $arrayInfo = Type::parseArrayType($typeCtx);
+            $baseType = $arrayInfo['baseType'];
+            $elementDimensions = $arrayInfo['dimensions'];
+        } else {
+            $baseType = $typeCtx->getText();
+            $elementDimensions = [];
+        }
+        
+        $elements = [];
+        if ($ctx->arrayLiteral()->arrayElements() !== null) {
+            $elements = $this->processArrayElements(
+                $ctx->arrayLiteral()->arrayElements(),
+                $elementDimensions,
+                $baseType
+            );
+        }
+        
+        if (count($elements) !== $size) {
+            throw new Exception(
+                "El arreglo declara " . $size . " elementos pero se proporcionaron " . count($elements)
+            );
+        }
+        
+        return $elements;
+    }
+    
+    public function visitArrayElements(ArrayElementsContext $ctx) {
+        return [];
+    }
+    
+    private function processArrayElements($ctx, $dimensions, $baseType) {
+        $elements = [];
+        
+        foreach ($ctx->arrayElement() as $elementCtx) {
+            if ($elementCtx instanceof SimpleArrayElementContext) {
+                $value = $this->visit($elementCtx->e());
+                
+                if (empty($dimensions)) {
+                    if (!Type::isCompatible($value, $baseType)) {
+                        $inferredType = Type::inferType($value);
+                        throw new Exception(
+                            "Tipo de elemento incorrecto: se esperaba '" . $baseType . 
+                            "' pero se recibió '" . $inferredType . "'"
+                        );
+                    }
+                    if ($value !== null) {
+                        $value = Type::cast($value, $baseType);
+                    }
+                }
+                
+                $elements[] = $value;
+                
+            } elseif ($elementCtx instanceof NestedArrayElementContext) {
+                $nestedElements = $this->processArrayElements(
+                    $elementCtx->arrayElements(),
+                    array_slice($dimensions, 1),
+                    $baseType
+                );
+                $elements[] = $nestedElements;
+            }
+        }
+        
+        return $elements;
+    }
 
     public function visitVarDeclarationTypedEmpty(VarDeclarationTypedEmptyContext $ctx) {
         $varName = $ctx->ID()->getText();
-        $typeName = $ctx->type()->getText();
+        $typeCtx = $ctx->type();
+        
+        if ($typeCtx->INT() !== null) {
+            $arrayInfo = Type::parseArrayType($typeCtx);
+            $defaultValue = Type::createArrayWithDefaults(
+                $arrayInfo['dimensions'],
+                $arrayInfo['baseType']
+            );
+            
+            $this->env->set($varName, $defaultValue);
+            
+            $tipoStr = Type::arrayTypeToString($arrayInfo['dimensions'], $arrayInfo['baseType']);
+            $this->registrarSimbolo($varName, $tipoStr, $defaultValue, $ctx);
+            
+            return $defaultValue;
+        }
+        
+        $typeName = $typeCtx->getText();
         $defaultValue = $this->getDefaultValue($typeName);
         $this->env->set($varName, $defaultValue);
         $this->registrarSimbolo($varName, $typeName, $defaultValue, $ctx);
@@ -436,7 +560,13 @@ class Interpreter extends GrammarBaseVisitor {
         
         $tipoRetorno = null;
         if ($ctx->type() !== null) {
-            $tipoRetorno = $ctx->type()->getText();
+            $typeCtx = $ctx->type();
+            
+            if ($typeCtx->INT() !== null) {
+                $tipoRetorno = Type::parseArrayType($typeCtx);
+            } else {
+                $tipoRetorno = $typeCtx->getText();
+            }
         }
         
         $function = new Foreign($ctx, $this->env, $params, $tiposParams, $tipoRetorno);
@@ -841,10 +971,17 @@ class Interpreter extends GrammarBaseVisitor {
         
         for ($i = 0; $i < count($ids); $i++) {
             $paramNombre = $ids[$i]->getText();
-            $paramTipo = $types[$i]->getText();
+            $typeCtx = $types[$i];
+
+            if ($typeCtx->INT() !== null) {
+                $arrayInfo = Type::parseArrayType($typeCtx);
+                $tipos[] = $arrayInfo;
+            } else {
+                $paramTipo = $typeCtx->getText();
+                $tipos[] = $paramTipo;
+            }
             
             $params[] = $paramNombre;
-            $tipos[] = $paramTipo;
         }
         
         return [
@@ -1000,7 +1137,6 @@ class Interpreter extends GrammarBaseVisitor {
                 $args = $this->visit($ctx->args());
             }
             
-            // Validar aridad si la función no acepta cantidad variable
             $arity = $function->get_arity();
             if ($arity !== -1 && count($args) !== $arity) {
                 $mensaje = "La función " . $moduleName . "." . $functionName . 
@@ -1043,5 +1179,132 @@ class Interpreter extends GrammarBaseVisitor {
             $this->registrarErrorSemantico($e->getMessage(), $ctx);
             return null;
         }
+    }
+
+    public function visitVarDeclarationTypedMultiple(VarDeclarationTypedMultipleContext $ctx) {
+        $typeCtx = $ctx->type();
+        $ids = $ctx->idList->ID();
+        $exprs = $ctx->exprList->e();
+        
+        if (count($ids) !== count($exprs)) {
+            throw new Exception(
+                "Declaración múltiple: se esperaban " . count($ids) . 
+                " valores pero se proporcionaron " . count($exprs)
+            );
+        }
+        
+        $isArrayType = ($typeCtx->INT() !== null);
+        
+        if ($isArrayType) {
+            $arrayInfo = Type::parseArrayType($typeCtx);
+            $baseType = $arrayInfo['baseType'];
+            $dimensions = $arrayInfo['dimensions'];
+            $tipoStr = Type::arrayTypeToString($dimensions, $baseType);
+        } else {
+            $typeName = $typeCtx->getText();
+        }
+        
+        for ($i = 0; $i < count($ids); $i++) {
+            $varName = $ids[$i]->getText();
+            $value = $this->visit($exprs[$i]);
+            
+            if ($isArrayType) {
+                if (!Type::validateArrayStructure($value, $dimensions, $baseType)) {
+                    throw new Exception(
+                        "El valor no coincide con el tipo de arreglo '" . $tipoStr . 
+                        "' para la variable '" . $varName . "'"
+                    );
+                }
+                $this->env->set($varName, $value);
+                $this->registrarSimbolo($varName, $tipoStr, $value, $ctx);
+            } else {
+                if (!Type::isCompatible($value, $typeName)) {
+                    $inferredType = Type::inferType($value);
+                    $mensaje = "No se puede asignar un valor de tipo '" . $inferredType . 
+                              "' a la variable '" . $varName . "' de tipo '" . $typeName . "'";
+                    $this->registrarErrorSemantico($mensaje, $ctx);
+                    $value = Type::getDefault($typeName);
+                } else {
+                    if ($value !== null) {
+                        $value = Type::cast($value, $typeName);
+                    }
+                }
+                
+                $this->env->set($varName, $value);
+                $this->registrarSimbolo($varName, $typeName, $value, $ctx);
+            }
+        }
+        
+        return null;
+    }
+    
+    public function visitShortVarDeclarationMultiple(ShortVarDeclarationMultipleContext $ctx) {
+        $ids = $ctx->idList->ID();
+        $exprs = $ctx->exprList->e();
+        
+        if (count($ids) !== count($exprs)) {
+            throw new Exception(
+                "Declaración múltiple: se esperaban " . count($ids) . 
+                " valores pero se proporcionaron " . count($exprs)
+            );
+        }
+        
+        for ($i = 0; $i < count($ids); $i++) {
+            $varName = $ids[$i]->getText();
+            $value = $this->visit($exprs[$i]);
+            
+            $this->env->set($varName, $value);
+            
+            $tipoInferido = Type::inferType($value);
+            $this->registrarSimbolo($varName, $tipoInferido, $value, $ctx);
+        }
+        
+        return null;
+    }
+
+    public function visitTrueExpression(TrueExpressionContext $ctx) {
+        return true;
+    }
+    
+    public function visitFalseExpression(FalseExpressionContext $ctx) {
+        return false;
+    }
+
+    public function visitCompoundAssignmentStatement(CompoundAssignmentStatementContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        $operator = $ctx->op->getText();
+        $rightValue = $this->visit($ctx->e());
+        
+        try {
+            $currentValue = $this->env->get($varName);
+        } catch (Exception $e) {
+            $this->registrarErrorSemantico("Variable '" . $varName . "' no definida", $ctx);
+            return null;
+        }
+        
+        $newValue = null;
+        switch ($operator) {
+            case '+=':
+                $newValue = $currentValue + $rightValue;
+                break;
+            case '-=':
+                $newValue = $currentValue - $rightValue;
+                break;
+            case '*=':
+                $newValue = $currentValue * $rightValue;
+                break;
+            case '/=':
+                if ($rightValue == 0) {
+                    $this->registrarErrorSemantico("División por cero", $ctx);
+                    return null;
+                }
+                $newValue = $currentValue / $rightValue;
+                break;
+            default:
+                throw new Exception("Operador compuesto desconocido: " . $operator);
+        }
+        
+        $this->env->assign($varName, $newValue);
+        return $newValue;
     }
 }

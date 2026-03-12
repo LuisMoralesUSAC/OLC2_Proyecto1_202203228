@@ -205,4 +205,75 @@ class Type {
         }
         return false;
     }
+
+    public static function parseArrayType($typeCtx) {
+        $dimensions = [];
+        $current = $typeCtx;
+        
+        while ($current->INT() !== null) {
+            $size = intval($current->INT()->getText());
+            $dimensions[] = $size;
+            $current = $current->type();
+        }
+        
+        $baseType = $current->getText();
+        
+        return [
+            'baseType' => $baseType,
+            'dimensions' => $dimensions
+        ];
+    }
+    
+    public static function createArrayWithDefaults($dimensions, $baseType) {
+        if (empty($dimensions)) {
+            return self::getDefault($baseType);
+        }
+        
+        $size = array_shift($dimensions);
+        $array = [];
+        
+        for ($i = 0; $i < $size; $i++) {
+            if (empty($dimensions)) {
+                $array[$i] = self::getDefault($baseType);
+            } else {
+                $array[$i] = self::createArrayWithDefaults($dimensions, $baseType);
+            }
+        }
+        
+        return $array;
+    }
+    
+    public static function validateArrayStructure($array, $dimensions, $baseType) {
+        if (empty($dimensions)) {
+            return self::isCompatible($array, $baseType);
+        }
+        
+        if (!is_array($array)) {
+            return false;
+        }
+        
+        $expectedSize = $dimensions[0];
+        if (count($array) !== $expectedSize) {
+            return false;
+        }
+        
+        $remainingDimensions = array_slice($dimensions, 1);
+        
+        foreach ($array as $element) {
+            if (!self::validateArrayStructure($element, $remainingDimensions, $baseType)) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    public static function arrayTypeToString($dimensions, $baseType) {
+        $str = "";
+        foreach ($dimensions as $dim) {
+            $str .= "[" . $dim . "]";
+        }
+        $str .= $baseType;
+        return $str;
+    }
 }

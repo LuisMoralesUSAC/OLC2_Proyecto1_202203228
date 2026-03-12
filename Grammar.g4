@@ -11,17 +11,21 @@ type
     | 'bool'
     | 'rune'
     | 'string'
+    | '[' INT ']' type
     ;
 
 // Statements
 stmt
     : ID '.' ID '(' args? ')'              # ModuleFunctionCall
     | 'print' '(' e ')'                    # PrintStatement
+    | 'var' idList=idListDecl type '=' exprList=exprListDecl  # VarDeclarationTypedMultiple
     | 'var' ID type '=' e                  # VarDeclarationTyped
     | 'var' ID type                        # VarDeclarationTypedEmpty
+    | idList=idListDecl ':=' exprList=exprListDecl            # ShortVarDeclarationMultiple
     | ID ':=' e                            # ShortVarDeclaration
     | 'const' ID type '=' e                # ConstDeclaration
-    | 'var' ID '=' e                       # VarDeclaration    
+    | 'var' ID '=' e                       # VarDeclaration
+    | ID op=('+=' | '-=' | '*=' | '/=') e  # CompoundAssignmentStatement
     | ID '=' e                             # AssignmentStatement
     | 'if' e block else?                   # IfStatement
     | 'for' forInit? ';' forCond? ';' forPost? block  # ForStatement
@@ -128,6 +132,7 @@ primary
     | ID '.' ID '(' args? ')'              # ModuleFunctionExpression
     | ID '(' args? ')'                     # FunctionCallExpression
     | ID ('[' index+=e ']')+               # ArrayAccessExpression
+    | arrayLiteral                         # ArrayLiteralExpression
     | '(' e ')'                            # ParenExpression
     ;
 
@@ -137,6 +142,27 @@ params
 
 args
     : e (',' e)*                        # ArgumentList
+    ;
+
+arrayLiteral
+    : '[' INT ']' type '{' arrayElements? '}'
+    ;
+
+arrayElements
+    : arrayElement (',' arrayElement)*
+    ;
+
+arrayElement
+    : e                                     # SimpleArrayElement
+    | '{' arrayElements '}'                 # NestedArrayElement
+    ;
+
+idListDecl
+    : ID (',' ID)+
+    ;
+
+exprListDecl
+    : e (',' e)+
     ;
 
 // Lexer rules

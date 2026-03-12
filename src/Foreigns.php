@@ -27,19 +27,27 @@ class Foreign extends Invocable {
             $valorArg = $args[$i];
             
             if ($i < count($this->tiposParams)) {
-                $tipoEsperado = $this->tiposParams[$i];
-                $tipoRecibido = Type::inferType($valorArg);
+                $tipoParam = $this->tiposParams[$i];
                 
-                if (!Type::isCompatible($valorArg, $tipoEsperado)) {
-                    $visitor->console .= "Advertencia: El parámetro '" . $nombreParam . 
-                                        "' espera tipo '" . $tipoEsperado . 
-                                        "' pero recibió '" . $tipoRecibido . "'\n";
-                    if ($valorArg !== null) {
-                        $valorArg = Type::cast($valorArg, $tipoEsperado);
+                if (is_array($tipoParam)) {
+                    if (!Type::validateArrayStructure($valorArg, $tipoParam['dimensions'], $tipoParam['baseType'])) {
+                        $tipoEsperado = Type::arrayTypeToString($tipoParam['dimensions'], $tipoParam['baseType']);
+                        $visitor->console .= "Advertencia: El parámetro '" . $nombreParam . 
+                                            "' espera tipo '" . $tipoEsperado . "'\n";
                     }
-                }
-                if ($valorArg !== null) {
-                    $valorArg = Type::cast($valorArg, $tipoEsperado);
+                } else {
+                    $tipoRecibido = Type::inferType($valorArg);
+                    if (!Type::isCompatible($valorArg, $tipoParam)) {
+                        $visitor->console .= "Advertencia: El parámetro '" . $nombreParam . 
+                                            "' espera tipo '" . $tipoParam . 
+                                            "' pero recibió '" . $tipoRecibido . "'\n";
+                        if ($valorArg !== null) {
+                            $valorArg = Type::cast($valorArg, $tipoParam);
+                        }
+                    }
+                    if ($valorArg !== null) {
+                        $valorArg = Type::cast($valorArg, $tipoParam);
+                    }
                 }
             }
             
@@ -56,17 +64,24 @@ class Foreign extends Invocable {
         if ($result instanceof ReturnType) {
             $valorRetorno = $result->value;
             if ($this->tipoRetorno !== null) {
-                $tipoRetornoReal = Type::inferType($valorRetorno);
-                
-                if (!Type::isCompatible($valorRetorno, $this->tipoRetorno)) {
-                    $visitor->console .= "Advertencia: La función debe retornar tipo '" . 
-                                        $this->tipoRetorno . "' pero retornó '" . $tipoRetornoReal . "'\n";
+                if (is_array($this->tipoRetorno)) {
+                    if (!Type::validateArrayStructure($valorRetorno, $this->tipoRetorno['dimensions'], $this->tipoRetorno['baseType'])) {
+                        $tipoEsperado = Type::arrayTypeToString($this->tipoRetorno['dimensions'], $this->tipoRetorno['baseType']);
+                        $visitor->console .= "Advertencia: La función debe retornar tipo '" . $tipoEsperado . "'\n";
+                    }
+                } else {
+                    $tipoRetornoReal = Type::inferType($valorRetorno);
+                    
+                    if (!Type::isCompatible($valorRetorno, $this->tipoRetorno)) {
+                        $visitor->console .= "Advertencia: La función debe retornar tipo '" . 
+                                            $this->tipoRetorno . "' pero retornó '" . $tipoRetornoReal . "'\n";
+                        if ($valorRetorno !== null) {
+                            $valorRetorno = Type::cast($valorRetorno, $this->tipoRetorno);
+                        }
+                    }
                     if ($valorRetorno !== null) {
                         $valorRetorno = Type::cast($valorRetorno, $this->tipoRetorno);
                     }
-                }
-                if ($valorRetorno !== null) {
-                    $valorRetorno = Type::cast($valorRetorno, $this->tipoRetorno);
                 }
             }
             
