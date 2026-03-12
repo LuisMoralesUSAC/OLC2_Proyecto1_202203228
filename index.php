@@ -21,7 +21,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $datosTablaSimbolos = isset($_POST["datosTabla"]) ? $_POST["datosTabla"] : null;
         
         if ($accion === "descargarErrores" && $datosReporteErrores) {
-            $errores = unserialize(base64_decode($datosReporteErrores));
+            $erroresHTML = base64_decode($datosReporteErrores);
             
             header('Content-Type: text/html; charset=utf-8');
             header('Content-Disposition: attachment; filename="reporte_errores.html"');
@@ -32,13 +32,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             echo '</head><body>';
             echo '<h1>Reporte de Errores - Golampi Interpreter</h1>';
             echo '<p><strong>Fecha:</strong> ' . date('Y-m-d H:i:s') . '</p>';
-            echo $errores->generarReporteHTML();
+            echo $erroresHTML;
             echo '</body></html>';
             exit;
         }
         
         if ($accion === "descargarTabla" && $datosTablaSimbolos) {
-            $tabla = unserialize(base64_decode($datosTablaSimbolos));
+            $tablaHTML = base64_decode($datosTablaSimbolos);
             
             header('Content-Type: text/html; charset=utf-8');
             header('Content-Disposition: attachment; filename="tabla_simbolos.html"');
@@ -49,7 +49,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             echo '</head><body>';
             echo '<h1>Tabla de Símbolos - Golampi Interpreter</h1>';
             echo '<p><strong>Fecha:</strong> ' . date('Y-m-d H:i:s') . '</p>';
-            echo $tabla->generarReporteHTML();
+            echo $tablaHTML;
             echo '</body></html>';
             exit;
         }
@@ -214,7 +214,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             <?php if ($reporteErrores !== null): ?>
                 <form method="post" style="display:inline;">
                     <input type="hidden" name="accion" value="descargarErrores">
-                    <input type="hidden" name="datosErrores" value="<?php echo base64_encode(serialize($reporteErrores)); ?>">
+                    <input type="hidden" name="datosErrores" value="<?php echo base64_encode($reporteErrores->generarReporteHTML()); ?>">
                     <button type="submit" class="btn btn-report">
                         📄 Descargar Reporte de Errores
                     </button>
@@ -224,7 +224,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             <?php if ($tablaSimbolos !== null): ?>
                 <form method="post" style="display:inline;">
                     <input type="hidden" name="accion" value="descargarTabla">
-                    <input type="hidden" name="datosTabla" value="<?php echo base64_encode(serialize($tablaSimbolos)); ?>">
+                    <input type="hidden" name="datosTabla" value="<?php echo base64_encode($tablaSimbolos->generarReporteHTML()); ?>">
                     <button type="submit" class="btn btn-report">
                         📊 Descargar Tabla de Símbolos
                     </button>

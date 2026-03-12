@@ -13,3 +13,4 @@ require_once __DIR__ . "/src/Foreigns.php";
 require_once __DIR__ . "/src/Simbolo.php";
 require_once __DIR__ . "/src/TablaSimbolos.php";
 require_once __DIR__ . "/src/ReporteErrores.php";
+require_once __DIR__ . "/src/Modulos.php";

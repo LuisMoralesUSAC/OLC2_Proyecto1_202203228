@@ -53,6 +53,9 @@ use Context\ForPostDecrementContext;
 use Context\IncrementStatementContext;
 use Context\DecrementStatementContext;
 use Context\NilExpressionContext;
+use Context\ModuleFunctionCallContext;
+use Context\ModuleFunctionExpressionContext;
+use Context\IdExpressionContext;
 
 class Interpreter extends GrammarBaseVisitor {
     public $console;
@@ -74,10 +77,65 @@ class Interpreter extends GrammarBaseVisitor {
         }
     }
 
-    public function visitProgram(ProgramContext $ctx) {                  
-        foreach ($ctx->stmt() as $stmt) {            
-            $this->visit($stmt);
+    public function visitProgram(ProgramContext $ctx) {
+        $mainFunction = null;
+        $mainCount = 0;
+        
+        foreach ($ctx->stmt() as $stmt) {
+            if ($stmt instanceof FunctionDeclarationContext) {
+                $this->visit($stmt);
+                
+                $functionName = $stmt->ID()->getText();
+                if ($functionName === "main") {
+                    $mainCount++;
+                    
+                    if ($stmt->params() !== null) {
+                        $this->registrarErrorSemantico(
+                            "La función 'main' no debe tener parámetros",
+                            $stmt
+                        );
+                    }
+                    
+                    if ($stmt->type() !== null) {
+                        $this->registrarErrorSemantico(
+                            "La función 'main' no debe tener tipo de retorno",
+                            $stmt
+                        );
+                    }
+                    
+                    try {
+                        $mainFunction = $this->env->get("main");
+                    } catch (Exception $e) {
+                    }
+                }
+            }
         }
+        
+        if ($mainCount === 0) {
+            $errorMsg = "Error: No se encontró la función 'main'. Todo programa debe tener una función main.";
+            $this->console .= $errorMsg . "\n";
+            return $this->console;
+        }
+        
+        if ($mainCount > 1) {
+            $errorMsg = "Error: Se encontraron " . $mainCount . " funciones 'main'. Solo debe existir una.";
+            $this->console .= $errorMsg . "\n";
+            return $this->console;
+        }
+        
+        foreach ($ctx->stmt() as $stmt) {
+            if (!($stmt instanceof FunctionDeclarationContext)) {
+                $linea = $stmt->getStart()->getLine();
+                $this->registrarErrorSemantico(
+                    "El código ejecutable debe estar dentro de la función 'main' o funciones auxiliares",
+                    $stmt
+                );
+            }
+        }
+        if ($mainFunction !== null && $mainFunction instanceof Invocable) {
+            $mainFunction->invoke($this, []);
+        }
+        
         return $this->console;
     }
 
@@ -716,7 +774,12 @@ class Interpreter extends GrammarBaseVisitor {
 
     public function visitIntExpression(IntExpressionContext $ctx) {
         return intval($ctx->INT()->getText());
-    }  
+    }
+
+    public function visitIdExpression(IdExpressionContext $ctx) {
+        $varName = $ctx->ID()->getText();
+        return $this->env->get($varName);
+    }
     
     public function visitReferenceExpression(ReferenceExpressionContext $ctx) {
         $varName = $ctx->ID()->getText();
@@ -788,6 +851,16 @@ class Interpreter extends GrammarBaseVisitor {
             'nombres' => $params,
             'tipos' => $tipos
         ];
+    }
+
+    public function visitArgs(ArgsContext $ctx) {
+        $args = [];
+        foreach ($ctx->e() as $expr) {
+            $valor = $this->visit($expr);
+            $args[] = $valor;
+        }
+        
+        return $args;
     }
 
     public function visitArgumentList(ArgumentListContext $ctx) {
@@ -913,5 +986,62 @@ class Interpreter extends GrammarBaseVisitor {
         $linea = $ctx->getStart()->getLine();
         $columna = $ctx->getStart()->getCharPositionInLine();
         $this->reporteErrores->agregarErrorSemantico($mensaje, $linea, $columna);
+    }
+    
+    public function visitModuleFunctionCall(ModuleFunctionCallContext $ctx) {
+        $moduleName = $ctx->ID()[0]->getText();
+        $functionName = $ctx->ID()[1]->getText();
+        
+        try {
+            $function = Modulos::obtenerFuncion($moduleName, $functionName);
+            
+            $args = [];
+            if ($ctx->args() !== null) {
+                $args = $this->visit($ctx->args());
+            }
+            
+            // Validar aridad si la función no acepta cantidad variable
+            $arity = $function->get_arity();
+            if ($arity !== -1 && count($args) !== $arity) {
+                $mensaje = "La función " . $moduleName . "." . $functionName . 
+                          " espera " . $arity . " argumentos, pero se le dieron " . count($args);
+                $this->registrarErrorSemantico($mensaje, $ctx);
+                return null;
+            }
+            
+            return $function->invoke($this, $args);
+            
+        } catch (Exception $e) {
+            $this->registrarErrorSemantico($e->getMessage(), $ctx);
+            return null;
+        }
+    }
+    
+    public function visitModuleFunctionExpression(ModuleFunctionExpressionContext $ctx) {
+        $moduleName = $ctx->ID()[0]->getText();
+        $functionName = $ctx->ID()[1]->getText();
+        
+        try {
+            $function = Modulos::obtenerFuncion($moduleName, $functionName);
+            
+            $args = [];
+            if ($ctx->args() !== null) {
+                $args = $this->visit($ctx->args());
+            }
+            
+            $arity = $function->get_arity();
+            if ($arity !== -1 && count($args) !== $arity) {
+                $mensaje = "La función " . $moduleName . "." . $functionName . 
+                          " espera " . $arity . " argumentos, pero se le dieron " . count($args);
+                $this->registrarErrorSemantico($mensaje, $ctx);
+                return null;
+            }
+            
+            return $function->invoke($this, $args);
+            
+        } catch (Exception $e) {
+            $this->registrarErrorSemantico($e->getMessage(), $ctx);
+            return null;
+        }
     }
 }

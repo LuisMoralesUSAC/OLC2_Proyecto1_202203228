@@ -15,7 +15,8 @@ type
 
 // Statements
 stmt
-    : 'print' '(' e ')'                    # PrintStatement
+    : ID '.' ID '(' args? ')'              # ModuleFunctionCall
+    | 'print' '(' e ')'                    # PrintStatement
     | 'var' ID type '=' e                  # VarDeclarationTyped
     | 'var' ID type                        # VarDeclarationTypedEmpty
     | ID ':=' e                            # ShortVarDeclaration
@@ -114,19 +115,20 @@ unary
     | '!' unary                        # NotExpression
     ;
 
-primary    
-    : '(' e ')'                        # GroupedExpression
-    | 'print' '(' e ')'                # PrintExpression
-    | FLOAT                            # FloatExpression
-    | INT                              # IntExpression
-    | 'nil'                            # NilExpression
-    | ID                               # ReferenceExpression
-    | bool=('true'|'false')            # BoolExpression
-    | ID '(' args? ')'                 # FunctionCallExpression
-    | '[' e (',' e)* ']'               # ArrayExpression
-    | ID ('[' e ']')+                  # ArrayAccessExpression
-    | STRING                           # StringExpression
-    | RUNE                             # RuneExpression
+primary
+    : INT                                  # IntExpression
+    | FLOAT                                # FloatExpression
+    | STRING                               # StringExpression
+    | RUNE                                 # RuneExpression
+    | ID                                   # IdExpression
+    | 'true'                               # TrueExpression
+    | 'false'                              # FalseExpression
+    | 'nil'                                # NilExpression
+    | 'print' '(' e ')'                    # PrintExpression
+    | ID '.' ID '(' args? ')'              # ModuleFunctionExpression
+    | ID '(' args? ')'                     # FunctionCallExpression
+    | ID ('[' index+=e ']')+               # ArrayAccessExpression
+    | '(' e ')'                            # ParenExpression
     ;
 
 params
