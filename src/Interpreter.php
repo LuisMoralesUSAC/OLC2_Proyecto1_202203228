@@ -65,6 +65,10 @@ use Context\ShortVarDeclarationMultipleContext;
 use Context\TrueExpressionContext;
 use Context\FalseExpressionContext;
 use Context\CompoundAssignmentStatementContext;
+use Context\SingleReturnTypeContext;
+use Context\MultipleReturnTypesContext;
+use Context\SingleReturnValueContext;
+use Context\MultipleReturnValuesContext;
 
 class Interpreter extends GrammarBaseVisitor {
     public $console;
@@ -97,7 +101,7 @@ class Interpreter extends GrammarBaseVisitor {
                 $functionName = $stmt->ID()->getText();
                 if ($functionName === "main") {
                     $mainCount++;
-                    
+
                     if ($stmt->params() !== null) {
                         $this->registrarErrorSemantico(
                             "La función 'main' no debe tener parámetros",
@@ -105,13 +109,12 @@ class Interpreter extends GrammarBaseVisitor {
                         );
                     }
                     
-                    if ($stmt->type() !== null) {
+                    if ($stmt->returnTypes() !== null) {
                         $this->registrarErrorSemantico(
                             "La función 'main' no debe tener tipo de retorno",
                             $stmt
                         );
                     }
-                    
                     try {
                         $mainFunction = $this->env->get("main");
                     } catch (Exception $e) {
@@ -131,7 +134,6 @@ class Interpreter extends GrammarBaseVisitor {
             $this->console .= $errorMsg . "\n";
             return $this->console;
         }
-        
         foreach ($ctx->stmt() as $stmt) {
             if (!($stmt instanceof FunctionDeclarationContext)) {
                 $linea = $stmt->getStart()->getLine();
@@ -539,16 +541,28 @@ class Interpreter extends GrammarBaseVisitor {
     }
 
     public function visitReturnStatement(ReturnStatementContext $ctx) {
-        $value = null;
-        if ($ctx->e() !== null) {
-            $value = $this->visit($ctx->e());
+        if ($ctx->returnValues() === null) {
+            return new ReturnType(null);
         }
-        return new ReturnType($value);
+        
+        $returnValuesCtx = $ctx->returnValues();
+        
+        if ($returnValuesCtx instanceof SingleReturnValueContext) {
+            $value = $this->visit($returnValuesCtx->e());
+            return new ReturnType($value);
+        } elseif ($returnValuesCtx instanceof MultipleReturnValuesContext) {
+            $values = [];
+            foreach ($returnValuesCtx->exprListReturn()->e() as $expr) {
+                $values[] = $this->visit($expr);
+            }
+            return new ReturnType($values);
+        }
+        
+        return new ReturnType(null);
     }
 
     public function visitFunctionDeclaration(FunctionDeclarationContext $ctx) {
         $nombreFuncion = $ctx->ID()->getText();
-        
         $params = [];
         $tiposParams = [];
         
@@ -558,19 +572,28 @@ class Interpreter extends GrammarBaseVisitor {
             $tiposParams = $paramsData['tipos'];
         }
         
-        $tipoRetorno = null;
-        if ($ctx->type() !== null) {
-            $typeCtx = $ctx->type();
-            
-            if ($typeCtx->INT() !== null) {
-                $tipoRetorno = Type::parseArrayType($typeCtx);
-            } else {
-                $tipoRetorno = $typeCtx->getText();
+        $tiposRetorno = null;
+        if ($ctx->returnTypes() !== null) {
+            $returnTypesCtx = $ctx->returnTypes();
+            if ($returnTypesCtx instanceof SingleReturnTypeContext) {
+                $typeCtx = $returnTypesCtx->type();
+                if ($typeCtx->INT() !== null) {
+                    $tiposRetorno = Type::parseArrayType($typeCtx);
+                } else {
+                    $tiposRetorno = $typeCtx->getText();
+                }
+            } elseif ($returnTypesCtx instanceof MultipleReturnTypesContext) {
+                $tiposRetorno = [];
+                foreach ($returnTypesCtx->typeList()->type() as $typeCtx) {
+                    if ($typeCtx->INT() !== null) {
+                        $tiposRetorno[] = Type::parseArrayType($typeCtx);
+                    } else {
+                        $tiposRetorno[] = $typeCtx->getText();
+                    }
+                }
             }
         }
-        
-        $function = new Foreign($ctx, $this->env, $params, $tiposParams, $tipoRetorno);
-        
+        $function = new Foreign($ctx, $this->env, $params, $tiposParams, $tiposRetorno);
         $this->env->set($nombreFuncion, $function);
         $this->registrarSimbolo($nombreFuncion, "function", $function, $ctx);
     }
@@ -1185,16 +1208,13 @@ class Interpreter extends GrammarBaseVisitor {
         $typeCtx = $ctx->type();
         $ids = $ctx->idList->ID();
         $exprs = $ctx->exprList->e();
-        
         if (count($ids) !== count($exprs)) {
             throw new Exception(
                 "Declaración múltiple: se esperaban " . count($ids) . 
                 " valores pero se proporcionaron " . count($exprs)
             );
         }
-        
         $isArrayType = ($typeCtx->INT() !== null);
-        
         if ($isArrayType) {
             $arrayInfo = Type::parseArrayType($typeCtx);
             $baseType = $arrayInfo['baseType'];
@@ -1203,11 +1223,9 @@ class Interpreter extends GrammarBaseVisitor {
         } else {
             $typeName = $typeCtx->getText();
         }
-        
         for ($i = 0; $i < count($ids); $i++) {
             $varName = $ids[$i]->getText();
             $value = $this->visit($exprs[$i]);
-            
             if ($isArrayType) {
                 if (!Type::validateArrayStructure($value, $dimensions, $baseType)) {
                     throw new Exception(
@@ -1229,36 +1247,43 @@ class Interpreter extends GrammarBaseVisitor {
                         $value = Type::cast($value, $typeName);
                     }
                 }
-                
                 $this->env->set($varName, $value);
                 $this->registrarSimbolo($varName, $typeName, $value, $ctx);
             }
         }
-        
         return null;
     }
     
     public function visitShortVarDeclarationMultiple(ShortVarDeclarationMultipleContext $ctx) {
         $ids = $ctx->idList->ID();
         $exprs = $ctx->exprList->e();
-        
+        if (count($exprs) === 1) {
+            $expr = $exprs[0];
+            $value = $this->visit($expr);
+            if (is_array($value) && count($value) === count($ids)) {
+                for ($i = 0; $i < count($ids); $i++) {
+                    $varName = $ids[$i]->getText();
+                    $varValue = $value[$i];
+                    $this->env->set($varName, $varValue);
+                    $tipoInferido = Type::inferType($varValue);
+                    $this->registrarSimbolo($varName, $tipoInferido, $varValue, $ctx);
+                }
+                return null;
+            }
+        }
         if (count($ids) !== count($exprs)) {
             throw new Exception(
                 "Declaración múltiple: se esperaban " . count($ids) . 
                 " valores pero se proporcionaron " . count($exprs)
             );
         }
-        
         for ($i = 0; $i < count($ids); $i++) {
             $varName = $ids[$i]->getText();
             $value = $this->visit($exprs[$i]);
-            
             $this->env->set($varName, $value);
-            
             $tipoInferido = Type::inferType($value);
             $this->registrarSimbolo($varName, $tipoInferido, $value, $ctx);
         }
-        
         return null;
     }
 

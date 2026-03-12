@@ -33,9 +33,9 @@ stmt
     | 'for' block                          # ForInfiniteStatement
     | 'switch' e '{' switchCase* '}'       # SwitchStatement
     | 'continue'                           # ContinueStatement
-    | 'break'                              # BreakStatement    
-    | 'return' e?                          # ReturnStatement
-    | 'func' ID '(' params? ')' type? block  # FunctionDeclaration
+    | 'break'                              # BreakStatement
+    | 'return' returnValues?               # ReturnStatement
+    | 'func' ID '(' params? ')' returnTypes? block  # FunctionDeclaration
     | ID '(' args? ')'                     # FunctionCallStatement
     | ID ('[' index+=e ']')+ '=' assign=e  # ArrayAssignmentStatement
     | ID '++'                              # IncrementStatement
@@ -162,6 +162,24 @@ idListDecl
     ;
 
 exprListDecl
+    : e (',' e)*
+    ;
+
+returnTypes
+    : type                                  # SingleReturnType
+    | '(' typeList ')'                      # MultipleReturnTypes
+    ;
+
+typeList
+    : type (',' type)*
+    ;
+
+returnValues
+    : e                                     # SingleReturnValue
+    | exprListReturn                        # MultipleReturnValues
+    ;
+
+exprListReturn
     : e (',' e)+
     ;
 
