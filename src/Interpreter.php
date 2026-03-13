@@ -69,6 +69,8 @@ use Context\SingleReturnTypeContext;
 use Context\MultipleReturnTypesContext;
 use Context\SingleReturnValueContext;
 use Context\MultipleReturnValuesContext;
+use Context\AddressOfExpressionContext;
+use Context\PointerTypeContext;
 
 class Interpreter extends GrammarBaseVisitor {
     public $console;
@@ -355,30 +357,30 @@ class Interpreter extends GrammarBaseVisitor {
 
     public function visitAssignmentStatement(AssignmentStatementContext $ctx) {
         $varName = $ctx->ID()->getText();
-        $value = $this->visit($ctx->e());
-        
+        $newValue = $this->visit($ctx->e());
         try {
-            $existingValue = $this->env->get($varName);
+            $currentValue = $this->env->get($varName);
         } catch (Exception $e) {
             $this->registrarErrorSemantico("Variable '" . $varName . "' no definida", $ctx);
             return null;
         }
-        
-        $existingType = Type::inferType($existingValue);
-        $newType = Type::inferType($value);
-        
-        if ($existingType !== Type::NIL && !Type::isCompatible($value, $existingType)) {
+        if ($currentValue instanceof Reference) {
+            $currentValue->setValue($newValue);
+            return $newValue;
+        }
+        $existingType = Type::inferType($currentValue);
+        $newType = Type::inferType($newValue);
+        if ($existingType !== Type::NIL && !Type::isCompatible($newValue, $existingType)) {
             $mensaje = "No se puede asignar un valor de tipo '" . $newType . 
                       "' a la variable '" . $varName . "' de tipo '" . $existingType . "'";
             $this->registrarErrorSemantico($mensaje, $ctx);
-            return $existingValue;
+            return $currentValue;
         }
-        if ($existingType !== Type::NIL && $value !== null) {
-            $value = Type::cast($value, $existingType);
+        if ($existingType !== Type::NIL && $newValue !== null) {
+            $newValue = Type::cast($newValue, $existingType);
         }
-        
-        $this->env->assign($varName, $value);
-        return $value;
+        $this->env->assign($varName, $newValue);
+        return $newValue;
     }
 
     public function visitIfStatement(IfStatementContext $ctx) {
@@ -615,12 +617,16 @@ class Interpreter extends GrammarBaseVisitor {
 
     public function visitArrayAssignmentStatement(ArrayAssignmentStatementContext $ctx) {
         $arrayName = $ctx->ID()->getText();
-        // Obtener la referencia al arreglo desde el entorno
-        $array = &$this->env->get_ref($arrayName);
+        $arrayOrRef = $this->env->get($arrayName);
+        $isReference = ($arrayOrRef instanceof Reference);
+        if ($isReference) {
+            $array = $arrayOrRef->getValue();
+        } else {
+            $array = &$this->env->get_ref($arrayName);
+        }
         if (!is_array($array)) {
             throw new Exception("La variable " . $arrayName . " no es un arreglo");
         }
-        // Evaluar los índices y almacenarlos en un arreglo
         $indices = array();
         foreach ($ctx->index as $index) {
             $idx = $this->visit($index);
@@ -629,8 +635,7 @@ class Interpreter extends GrammarBaseVisitor {
             }
             $indices[] = $idx;
         }
-        $value = $this->visit($ctx->assign); 
-        // Navegar hasta el arreglo interno correcto
+        $value = $this->visit($ctx->assign);
         $current = &$array;
         for ($i = 0; $i < count($indices) - 1; $i++) {
             $idx = $indices[$i];
@@ -642,12 +647,14 @@ class Interpreter extends GrammarBaseVisitor {
             }
             $current = &$current[$idx];
         }
-        // Asignar el valor al índice final
         $finalIdx = end($indices);
         if (!array_key_exists($finalIdx, $current)) {
             throw new Exception("Índice fuera de rango: " . $finalIdx);
         }
-        $current[$finalIdx] = $value;        
+        $current[$finalIdx] = $value;
+        if ($isReference) {
+            $arrayOrRef->setValue($array);
+        }
     }
 
     public function visitBlockStatement(BlockStatementContext $ctx) {
@@ -931,7 +938,11 @@ class Interpreter extends GrammarBaseVisitor {
 
     public function visitIdExpression(IdExpressionContext $ctx) {
         $varName = $ctx->ID()->getText();
-        return $this->env->get($varName);
+        $value = $this->env->get($varName);
+        if ($value instanceof Reference) {
+            return $value->getValue();
+        }
+        return $value;
     }
     
     public function visitReferenceExpression(ReferenceExpressionContext $ctx) {
@@ -971,11 +982,15 @@ class Interpreter extends GrammarBaseVisitor {
     }
 
     public function visitArrayAccessExpression(ArrayAccessExpressionContext $ctx) {
-        $array = $this->env->get($ctx->ID()->getText());        
+        $varName = $ctx->ID()->getText();
+        $array = $this->env->get($varName);
+        if ($array instanceof Reference) {
+            $array = $array->getValue();
+        }
         foreach ($ctx->e() as $index) {
             $idx = $this->visit($index);
             if (!is_array($array)) {
-                throw new Exception("La variable " . $ctx->ID()->getText() . " no es un arreglo");
+                throw new Exception("La variable " . $varName . " no es un arreglo");
             }
             if (!array_key_exists($idx, $array)) {
                 throw new Exception("Índice fuera de rango: " . $idx);
@@ -995,8 +1010,14 @@ class Interpreter extends GrammarBaseVisitor {
         for ($i = 0; $i < count($ids); $i++) {
             $paramNombre = $ids[$i]->getText();
             $typeCtx = $types[$i];
-
-            if ($typeCtx->INT() !== null) {
+            $pointerInfo = Type::parsePointerType($typeCtx);
+            
+            if ($pointerInfo['isPointer']) {
+                $tipos[] = [
+                    'isPointer' => true,
+                    'pointedType' => $pointerInfo['pointedType']
+                ];
+            } elseif ($typeCtx->INT() !== null) {
                 $arrayInfo = Type::parseArrayType($typeCtx);
                 $tipos[] = $arrayInfo;
             } else {
@@ -1331,5 +1352,23 @@ class Interpreter extends GrammarBaseVisitor {
         
         $this->env->assign($varName, $newValue);
         return $newValue;
+    }
+
+    public function visitAddressOfExpression(AddressOfExpressionContext $ctx) {
+        $unaryCtx = $ctx->unary();
+        
+        // Solo funciona con variables (IdExpression)
+        if ($unaryCtx instanceof PrimaryExpressionContext) {
+            $primaryCtx = $unaryCtx->primary();
+            
+            if ($primaryCtx instanceof IdExpressionContext) {
+                $varName = $primaryCtx->ID()->getText();
+                
+                // Crear y retornar una referencia
+                return new Reference($this->env, $varName);
+            }
+        }
+        
+        throw new Exception("El operador & solo puede aplicarse a variables");
     }
 }

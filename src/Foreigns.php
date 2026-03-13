@@ -26,12 +26,19 @@ class Foreign extends Invocable {
             $valorArg = $args[$i];
             if ($i < count($this->tiposParams)) {
                 $tipoParam = $this->tiposParams[$i];
-                if (is_array($tipoParam)) {
+                if (is_array($tipoParam) && isset($tipoParam['isPointer']) && $tipoParam['isPointer']) {
+                    if (!($valorArg instanceof Reference)) {
+                        $visitor->console .= "Advertencia: El parámetro '" . $nombreParam . 
+                                            "' espera un puntero (usar &)\n";
+                    }
+                    $newEnv->set($nombreParam, $valorArg);
+                } elseif (is_array($tipoParam) && isset($tipoParam['dimensions'])) {
                     if (!Type::validateArrayStructure($valorArg, $tipoParam['dimensions'], $tipoParam['baseType'])) {
                         $tipoEsperado = Type::arrayTypeToString($tipoParam['dimensions'], $tipoParam['baseType']);
                         $visitor->console .= "Advertencia: El parámetro '" . $nombreParam . 
                                             "' espera tipo '" . $tipoEsperado . "'\n";
                     }
+                    $newEnv->set($nombreParam, $valorArg);
                 } else {
                     $tipoRecibido = Type::inferType($valorArg);
                     if (!Type::isCompatible($valorArg, $tipoParam)) {
@@ -45,9 +52,12 @@ class Foreign extends Invocable {
                     if ($valorArg !== null) {
                         $valorArg = Type::cast($valorArg, $tipoParam);
                     }
+                    
+                    $newEnv->set($nombreParam, $valorArg);
                 }
+            } else {
+                $newEnv->set($nombreParam, $valorArg);
             }
-            $newEnv->set($nombreParam, $valorArg);
         }
         $envBeforeCall = $visitor->env;
         $visitor->env = $newEnv;

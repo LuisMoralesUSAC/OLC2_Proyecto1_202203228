@@ -276,4 +276,22 @@ class Type {
         $str .= $baseType;
         return $str;
     }
+
+    public static function parsePointerType($typeCtx) {
+        $typeText = $typeCtx->getText();
+        
+        if (strpos($typeText, '*') === 0) {
+            $pointedType = substr($typeText, 1);
+            
+            return [
+                'isPointer' => true,
+                'pointedType' => $pointedType
+            ];
+        }
+        
+        return [
+            'isPointer' => false,
+            'baseType' => $typeText
+        ];
+    }
 }

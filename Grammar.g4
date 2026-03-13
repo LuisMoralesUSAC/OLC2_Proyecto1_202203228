@@ -12,6 +12,7 @@ type
     | 'rune'
     | 'string'
     | '[' INT ']' type
+    | '*' type
     ;
 
 // Statements
@@ -117,6 +118,7 @@ unary
     : primary                          # PrimaryExpression
     | '-' unary                        # NegativeExpression
     | '!' unary                        # NotExpression
+    | '&' unary                        # AddressOfExpression
     ;
 
 primary
